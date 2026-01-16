@@ -22,6 +22,7 @@ export class EventsGateway
 {
   private readonly logger = new Logger(EventsGateway.name);
   private currentVideoUrl: string | null = null;
+  private activeUsers = new Map<string, string>();
 
   @WebSocketServer()
   server: Server;
@@ -31,6 +32,34 @@ export class EventsGateway
 
   handleDisconnect(client: Socket) {
     this.logger.log(`Client disconnected: ${client.id}`);
+    // Remove user from the list
+    if (this.activeUsers.has(client.id)) {
+      const username = this.activeUsers.get(client.id);
+      this.activeUsers.delete(client.id);
+
+      this.logger.log(`Client disconnected: ${username} (${client.id})`);
+
+      // Update everyone's list
+      this.broadcastUserList();
+    }
+  }
+
+  @SubscribeMessage('join_user')
+  handleJoinUser(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() username: string,
+  ) {
+    // Save the name
+    this.activeUsers.set(client.id, username);
+    this.logger.log(`Client joined: ${username}`);
+
+    // 1. Send current video state to THIS user only
+    if (this.currentVideoUrl) {
+      client.emit('sync_video_change', this.currentVideoUrl);
+    }
+
+    // 2. Send updated user list to EVERYONE
+    this.broadcastUserList();
   }
 
   handleConnection(client: Socket) {
@@ -81,5 +110,11 @@ export class EventsGateway
 
     // Tell everyone else to jump to this timestamp
     client.broadcast.emit('sync_seek', time);
+  }
+
+  // Helper to send the list of names
+  private broadcastUserList() {
+    const userList = Array.from(this.activeUsers.values());
+    this.server.emit('update_user_list', userList);
   }
 }
