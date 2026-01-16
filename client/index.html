@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Watch Together</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+      body {
+          background-color: #1a1a1a;
+          color: #eee;
+          font-family: sans-serif;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          min-height: 100vh;
+          margin: 0;
+          padding-top: 20px;
+      }
+      /* Style the dropdown */
+      select {
+          padding: 10px;
+          font-size: 16px;
+          margin-bottom: 20px;
+          width: 80%;
+          max-width: 600px;
+          background: #333;
+          color: white;
+          border: 1px solid #555;
+          border-radius: 5px;
+      }
+      video {
+          width: 90%;
+          max-width: 1100px;
+          box-shadow: 0 0 30px rgba(0,0,0,0.8);
+          border-radius: 8px;
+          background: black;
+      }
+      .status { margin-top: 10px; color: #888; font-size: 0.9em; }
+  </style>
+</head>
+<body>
+
+<select id="videoSelector">
+  <option value="" disabled selected>Loading videos...</option>
+</select>
+
+<video id="myVideo" controls playsinline>
+  Your browser does not support HTML5 video.
+</video>
+
+<div class="status" id="statusMsg">Connected</div>
+
+<script>
+  const socket = io();
+  const video = document.getElementById('myVideo');
+  const selector = document.getElementById('videoSelector');
+  const statusMsg = document.getElementById('statusMsg');
+
+  let isRemoteChange = false;
+
+  // 1. Fetch the video list on load
+  async function loadPlaylist() {
+    try {
+      const res = await fetch('/api/videos');
+      const videos = await res.json();
+
+      selector.innerHTML = '<option value="" disabled selected>Select a movie...</option>';
+
+      videos.forEach(v => {
+        const option = document.createElement('option');
+        option.value = v.url;
+        option.textContent = v.title || v.filename;
+        selector.appendChild(option);
+      });
+      const currentSrc = video.src;
+
+      if (currentSrc && currentSrc !== window.location.href) {
+        // Try to select the option that matches the current video
+        selector.value = currentSrc;
+      }
+
+    } catch (err) {
+      console.error("Failed to load playlist", err);
+      selector.innerHTML = '<option>Error loading list</option>';
+    }
+  }
+
+  loadPlaylist();
+
+  // 2. Handle User Selection
+  selector.addEventListener('change', (e) => {
+    const newUrl = e.target.value;
+    changeVideoSource(newUrl);
+
+    // Tell the server we changed it
+    socket.emit('change_video', newUrl);
+  });
+
+  // Helper: Change video src safely
+  function changeVideoSource(url) {
+    // 1. Mute events immediately
+    isRemoteChange = true;
+
+    // 2. Perform the swap
+    video.src = url;
+    selector.value = url;
+
+    // 3. Reset player state
+    video.currentTime = 0;
+    video.pause();
+
+    // 4. Un-mute events after a delay
+    // We need a timeout because the browser takes a moment to
+    // fire the 'pause'/'seeked' events caused by the lines above.
+    setTimeout(() => {
+      isRemoteChange = false;
+    }, 2000);
+  }
+
+  // --- SOCKET EVENTS ---
+
+  // Incoming: The other person changed the video
+  socket.on('sync_video_change', (newUrl) => {
+    console.log("Remote user changed video to:", newUrl);
+    statusMsg.textContent = "Video changed by remote user";
+
+    // Only update if it's actually different
+    if (video.src !== newUrl) {
+      changeVideoSource(newUrl);
+    }
+  });
+
+  // --- Standard Sync Logic (Same as before) ---
+
+  video.addEventListener('play', () => {
+    if (!isRemoteChange) socket.emit('play', video.currentTime);
+    isRemoteChange = false;
+  });
+
+  video.addEventListener('pause', () => {
+    if (!isRemoteChange) socket.emit('pause');
+    isRemoteChange = false;
+  });
+
+  video.addEventListener('seeked', () => {
+    if (!isRemoteChange) socket.emit('seek', video.currentTime);
+    isRemoteChange = false;
+  });
+
+  socket.on('sync_play', (time) => {
+    isRemoteChange = true;
+    if (Math.abs(video.currentTime - time) > 0.5) video.currentTime = time;
+    video.play();
+    statusMsg.textContent = "Playing...";
+  });
+
+  socket.on('sync_pause', () => {
+    isRemoteChange = true;
+    video.pause();
+    statusMsg.textContent = "Paused";
+  });
+
+  socket.on('sync_seek', (time) => {
+    isRemoteChange = true;
+    video.currentTime = time;
+    statusMsg.textContent = "Seeked";
+  });
+
+</script>
+</body>
+</html>
