@@ -3,27 +3,56 @@
 <head>
   <meta charset="UTF-8">
   <title>Watch Together</title>
+
+  <meta property="og:title" content="Movie Night: Watch Together" />
+  <meta property="og:description" content="Join the room to watch movies in perfect sync." />
+  <meta property="og:image" content="https://pub-19a077eaab8646bdaa0e4b741106048d.r2.dev/images/link_metadata_preview.jpg" />
+  <meta property="og:type" content="website" />
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="https://pub-19a077eaab8646bdaa0e4b741106048d.r2.dev/images/link_metadata_preview.jpg">
   <script src="/socket.io/socket.io.js"></script>
   <style>
-      /* ... existing styles ... */
       body {
           background-color: #1a1a1a;
           color: #eee;
-          font-family: sans-serif;
+          font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
           display: flex;
           flex-direction: column;
           align-items: center;
           min-height: 100vh;
           margin: 0;
-          padding-top: 20px;
       }
 
-      /* Layout container to hold video and sidebar side-by-side */
+      .banner-container {
+          width: 90%;
+          max-width: 1400px;
+          /* Height is removed here so it adjusts to the image size */
+          box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+          margin-bottom: 30px;
+          background: #000; /* Black background in case image loads slowly */
+      }
+
+      .banner-image {
+          width: 100%;
+          height: auto; /* This ensures the whole image is shown proportionally */
+          display: block; /* Removes tiny spacing gaps below images */
+      }
+
+      /* Main layout container */
       .container {
           display: flex;
           width: 90%;
           max-width: 1400px;
           gap: 20px;
+          padding-bottom: 50px; /* Space at bottom of page */
+      }
+
+      /* Responsive: Stack columns on mobile */
+      @media (max-width: 800px) {
+          .container { flex-direction: column; }
+          .sidebar { width: 100%; }
+          .banner-container { height: 120px; } /* Smaller banner on mobile */
       }
 
       .main-content {
@@ -33,26 +62,35 @@
           align-items: center;
       }
 
-      /* NEW: Sidebar for Users */
       .sidebar {
           flex: 1;
-          background: #333;
+          background: #2a2a2a;
           padding: 20px;
           border-radius: 8px;
           height: fit-content;
-          min-width: 200px;
+          min-width: 250px;
+          border: 1px solid #444;
       }
 
-      .sidebar h3 { margin-top: 0; border-bottom: 1px solid #555; padding-bottom: 10px; }
+      .sidebar h3 {
+          margin-top: 0;
+          border-bottom: 1px solid #555;
+          padding-bottom: 15px;
+          color: #fff;
+          font-size: 1.2rem;
+      }
+
       .user-list { list-style: none; padding: 0; }
       .user-list li {
-          padding: 8px;
-          background: #444;
-          margin-bottom: 5px;
-          border-radius: 4px;
+          padding: 12px;
+          background: #383838;
+          margin-bottom: 8px;
+          border-radius: 6px;
           display: flex;
           align-items: center;
+          font-size: 0.95rem;
       }
+
       /* Green dot for online status */
       .user-list li::before {
           content: '';
@@ -61,16 +99,42 @@
           height: 10px;
           background-color: #4cd137;
           border-radius: 50%;
-          margin-right: 10px;
+          margin-right: 12px;
+          box-shadow: 0 0 5px #4cd137;
       }
 
-      /* Existing styles for video/select */
-      select { width: 100%; padding: 10px; margin-bottom: 20px; background: #222; color: white; border: 1px solid #555; }
-      video { width: 100%; box-shadow: 0 0 30px rgba(0,0,0,0.8); border-radius: 8px; background: black; }
-      .status { margin-top: 10px; color: #888; font-size: 0.9em; }
+      select {
+          width: 100%;
+          padding: 12px;
+          margin-bottom: 20px;
+          background: #2a2a2a;
+          color: white;
+          border: 1px solid #444;
+          border-radius: 6px;
+          font-size: 1rem;
+          cursor: pointer;
+      }
+      select:focus { outline: 2px solid #007bff; }
+
+      video {
+          width: 100%;
+          box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+          border-radius: 8px;
+          background: black;
+      }
+
+      .status {
+          margin-top: 15px;
+          color: #aaa;
+          font-size: 0.9em;
+          font-style: italic;
+      }
   </style>
 </head>
 <body>
+<div class="banner-container">
+  <img src="https://pub-19a077eaab8646bdaa0e4b741106048d.r2.dev/images/banner.png" alt="Movie Night Banner" class="banner-image">
+</div>
 
 <div class="container">
   <div class="main-content">
