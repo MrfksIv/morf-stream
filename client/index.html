@@ -202,6 +202,13 @@
   let isRemoteChange = false;
   let currentSubtitleOffset = 0;
 
+  let hasServerVideo = false;
+  let currentVideoUrl = '';
+  // New: queue play until metadata ready
+  let pendingRemotePlayTime = null;
+  // New: track user interaction to satisfy autoplay policy
+  let interactionReady = false;
+
   // --- STEP 1: Ask for Name ---
   let username = prompt("Who is watching? (Enter your name)");
   if (!username) username = "Anonymous"; // Fallback
@@ -226,6 +233,50 @@
       userListEl.appendChild(li);
     });
   });
+
+  // Mark interaction on first user gesture and flush any pending remote play
+  function markInteractionReady() {
+    if (interactionReady) return;
+    interactionReady = true;
+
+    if (pendingRemotePlayTime !== null) {
+      // Apply queued time and attempt playback now that we have a gesture
+      isRemoteChange = true;
+      try {
+        if (Math.abs(video.currentTime - pendingRemotePlayTime) > 0.5) {
+          video.currentTime = pendingRemotePlayTime;
+        }
+        attemptPlay();
+        statusMsg.textContent = "Playing (interaction confirmed)...";
+      } catch {}
+      pendingRemotePlayTime = null;
+    }
+  }
+  document.addEventListener('click', markInteractionReady, { once: false });
+  document.addEventListener('keydown', markInteractionReady, { once: false });
+  document.addEventListener('touchstart', markInteractionReady, { once: false });
+
+  function attemptPlay() {
+    // Try normal play; if blocked, retry muted (allowed by most policies)
+    const p = video.play();
+    if (p && typeof p.then === 'function') {
+      p.catch(() => {
+        video.muted = true;
+        const pm = video.play();
+        if (pm && typeof pm.then === 'function') {
+          pm.then(() => {
+            // Unmute after a brief moment once playing started via a user gesture
+            if (interactionReady) {
+              setTimeout(() => { video.muted = false; }, 100);
+            }
+          }).catch(() => {
+            // Still blocked; prompt the user to click
+            statusMsg.textContent = "Click the video to start playback (sync).";
+          });
+        }
+      });
+    }
+  }
 
   async function loadPlaylist() {
     try {
@@ -368,10 +419,38 @@
     if (!isRemoteChange) socket.emit('seek', video.currentTime);
     isRemoteChange = false;
   });
+
+  // Updated: handle autoplay restrictions gracefully
   socket.on('sync_play', (time) => {
     isRemoteChange = true;
+
+    // If metadata isn't loaded yet, wait for it before setting currentTime
+    if (video.readyState < 1) {
+      pendingRemotePlayTime = time;
+      statusMsg.textContent = "Preparing to play (waiting for media)...";
+      video.addEventListener('loadedmetadata', () => {
+        if (pendingRemotePlayTime !== null) {
+          if (Math.abs(video.currentTime - pendingRemotePlayTime) > 0.5) {
+            video.currentTime = pendingRemotePlayTime;
+          }
+          attemptPlay();
+          statusMsg.textContent = "Playing...";
+          pendingRemotePlayTime = null;
+        }
+      }, { once: true });
+      return;
+    }
+
     if (Math.abs(video.currentTime - time) > 0.5) video.currentTime = time;
-    video.play();
+
+    // If user hasn't interacted yet, queue and prompt
+    if (!interactionReady) {
+      pendingRemotePlayTime = time;
+      statusMsg.textContent = "Click the page or video to enable sync playback.";
+      return;
+    }
+
+    attemptPlay();
     statusMsg.textContent = "Playing...";
   });
   socket.on('sync_pause', () => {
@@ -397,3 +476,4 @@
 </script>
 </body>
 </html>
+
