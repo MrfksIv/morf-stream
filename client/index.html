@@ -158,6 +158,26 @@
           min-width: 50px;
           text-align: center;
       }
+
+      .interaction-overlay {
+        position: fixed;
+        inset: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0,0,0,0.5);
+        z-index: 9999;
+      }
+      .interaction-overlay button {
+        background: #007bff;
+        color: white;
+        border: none;
+        padding: 12px 18px;
+        font-size: 1rem;
+        border-radius: 6px;
+        cursor: pointer;
+        box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+      }
   </style>
 </head>
 <body>
@@ -191,6 +211,11 @@
   </div>
 </div>
 
+<!-- Overlay shown when a remote play needs a user gesture -->
+<div id="interactionOverlay" class="interaction-overlay">
+  <button id="enableSyncBtn">Enable sync playback</button>
+</div>
+
 <script>
   const socket = io();
   const video = document.getElementById('myVideo');
@@ -208,6 +233,9 @@
   let pendingRemotePlayTime = null;
   // New: track user interaction to satisfy autoplay policy
   let interactionReady = false;
+
+  const overlay = document.getElementById('interactionOverlay');
+  const enableSyncBtn = document.getElementById('enableSyncBtn');
 
   // --- STEP 1: Ask for Name ---
   let username = prompt("Who is watching? (Enter your name)");
@@ -234,13 +262,19 @@
     });
   });
 
+  function showInteractionOverlay() {
+    if (!interactionReady) overlay.style.display = 'flex';
+  }
+  function hideInteractionOverlay() {
+    overlay.style.display = 'none';
+  }
+
   // Mark interaction on first user gesture and flush any pending remote play
   function markInteractionReady() {
     if (interactionReady) return;
     interactionReady = true;
-
+    hideInteractionOverlay();
     if (pendingRemotePlayTime !== null) {
-      // Apply queued time and attempt playback now that we have a gesture
       isRemoteChange = true;
       try {
         if (Math.abs(video.currentTime - pendingRemotePlayTime) > 0.5) {
@@ -255,6 +289,7 @@
   document.addEventListener('click', markInteractionReady, { once: false });
   document.addEventListener('keydown', markInteractionReady, { once: false });
   document.addEventListener('touchstart', markInteractionReady, { once: false });
+  enableSyncBtn.addEventListener('click', markInteractionReady);
 
   function attemptPlay() {
     // Try normal play; if blocked, retry muted (allowed by most policies)
@@ -272,7 +307,10 @@
           }).catch(() => {
             // Still blocked; prompt the user to click
             statusMsg.textContent = "Click the video to start playback (sync).";
+            showInteractionOverlay();
           });
+        } else {
+          showInteractionOverlay();
         }
       });
     }
@@ -446,7 +484,8 @@
     // If user hasn't interacted yet, queue and prompt
     if (!interactionReady) {
       pendingRemotePlayTime = time;
-      statusMsg.textContent = "Click the page or video to enable sync playback.";
+      statusMsg.textContent = "Interaction required: click to start synced playback.";
+      showInteractionOverlay();
       return;
     }
 
