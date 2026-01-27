@@ -117,4 +117,13 @@ export class EventsGateway
     const userList = Array.from(this.activeUsers.values());
     this.server.emit('update_user_list', userList);
   }
+
+  @SubscribeMessage('subtitle_offset')
+  handleSubtitleOffset(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() offset: number,
+  ) {
+    this.logger.log('Received subtitle offset: ' + offset);
+    client.broadcast.emit('sync_subtitle_offset', offset);
+  }
 }

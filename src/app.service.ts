@@ -38,7 +38,7 @@ export class AppService {
       // 1. List all files in the bucket (you can add { Prefix: 'movies/' } to filter by folder)
       const listCommand = new ListObjectsV2Command({
         Bucket: this.bucketName,
-        // Prefix: 'movies/' // Uncomment if you only want files inside a specific folder
+        Prefix: 'movies/',
       });
 
       const listResponse = await this.s3Client.send(listCommand);
@@ -63,6 +63,10 @@ export class AppService {
           });
 
           const headResponse = await this.s3Client.send(headCommand);
+          const baseName = this.getBaseName(file.Key!);
+          const subtitleUrl = await this.findMatchingSubtitle(baseName);
+
+          console.log('subtitleUrl', subtitleUrl);
 
           // R2 returns metadata keys in lowercase
           const title = headResponse.Metadata?.title || file.Key; // Fallback to filename if no title
@@ -70,16 +74,34 @@ export class AppService {
           return {
             filename: file.Key,
             url: `${this.publicUrlBase}/${file.Key}`,
+            subtitleUrl,
             title: title,
             size: file.Size,
           };
         }),
       );
-
+      console.log('videosWithMetadata', videosWithMetadata);
       return videosWithMetadata;
     } catch (error) {
       this.logger.error('Error fetching videos from R2', error);
       throw error;
+    }
+  }
+
+  private getBaseName(key: string): string {
+    const file = key.split('/').pop() || key;
+    return file.replace(/\.[^/.]+$/, '');
+  }
+
+  private async findMatchingSubtitle(baseName: string): Promise<string | null> {
+    const subtitleKey = `subtitles/${baseName}.vtt`;
+    try {
+      await this.s3Client.send(
+        new HeadObjectCommand({ Bucket: this.bucketName, Key: subtitleKey }),
+      );
+      return `${this.publicUrlBase}/${subtitleKey}`;
+    } catch {
+      return null;
     }
   }
 }

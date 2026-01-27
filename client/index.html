@@ -129,6 +129,35 @@
           font-size: 0.9em;
           font-style: italic;
       }
+
+      .subtitle-controls {
+          margin-top: 15px;
+          display: flex;
+          align-items: center;
+          gap: 15px;
+          background: #2a2a2a;
+          padding: 10px 20px;
+          border-radius: 50px; /* Pill shape */
+          border: 1px solid #444;
+      }
+      .subtitle-btn {
+          background: #444;
+          border: none;
+          color: white;
+          padding: 5px 12px;
+          border-radius: 4px;
+          cursor: pointer;
+          font-weight: bold;
+          transition: background 0.2s;
+      }
+      .subtitle-btn:hover { background: #555; }
+      .subtitle-btn:active { background: #666; }
+      #offsetDisplay {
+          font-family: monospace;
+          font-weight: bold;
+          min-width: 50px;
+          text-align: center;
+      }
   </style>
 </head>
 <body>
@@ -142,9 +171,16 @@
       <option value="" disabled selected>Loading videos...</option>
     </select>
 
-    <video id="myVideo" controls playsinline>
+    <video id="myVideo" controls playsinline crossorigin="anonymous">
       Your browser does not support HTML5 video.
     </video>
+    <div class="subtitle-controls">
+      <span style="color: #aaa; font-size: 0.9em;">Subtitle Sync:</span>
+      <button class="subtitle-btn" onclick="shiftSubtitles(-0.5)">- 0.5s</button>
+      <span id="offsetDisplay">0.0s</span>
+      <button class="subtitle-btn" onclick="shiftSubtitles(0.5)">+ 0.5s</button>
+    </div>
+
     <div class="status" id="statusMsg">Connected</div>
   </div>
 
@@ -161,6 +197,10 @@
   const selector = document.getElementById('videoSelector');
   const statusMsg = document.getElementById('statusMsg');
   const userListEl = document.getElementById('userList');
+
+  let playlist = [];
+  let isRemoteChange = false;
+  let currentSubtitleOffset = 0;
 
   // --- STEP 1: Ask for Name ---
   let username = prompt("Who is watching? (Enter your name)");
@@ -187,45 +227,128 @@
     });
   });
 
-  // ... [Paste the rest of your existing logic here: loadPlaylist, socket events for play/pause/seek] ...
-
-  let isRemoteChange = false;
-
   async function loadPlaylist() {
-    // (Same as before)
     try {
-      const res = await fetch('/api/videos');
-      const videos = await res.json();
+      const res = await fetch('/api/videos', { headers: { 'Accept': 'application/json' } });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+
+      playlist = Array.isArray(data) ? data : (Array.isArray(data?.videos) ? data.videos : []);
+      // Filter out entries missing a playable URL
+      playlist = playlist.filter(v => typeof v?.url === 'string' && v.url.length > 0);
+      console.log('playlist:', playlist);
       selector.innerHTML = '<option value="" disabled selected>Select a movie...</option>';
-      videos.forEach(v => {
+      playlist.forEach(v => {
         const option = document.createElement('option');
         option.value = v.url;
-        option.textContent = v.title || v.filename;
+        option.textContent = v.title || v.filename || v.url;
         selector.appendChild(option);
       });
+
+      // If nothing is selected and we have items, set the first item
       const currentSrc = video.src;
-      if (currentSrc && currentSrc !== window.location.href) {
+      if (!currentSrc || currentSrc === window.location.href) {
+        const first = playlist[0];
+        if (first) {
+          changeVideoSource(first.url);
+          // Avoid emitting socket change here; it's local init
+        }
+      } else {
+        // Ensure selector reflects current src
         selector.value = currentSrc;
+        attachSubtitleForUrl(currentSrc);
       }
     } catch (err) {
       console.error("Failed to load playlist", err);
+      selector.innerHTML = '<option value="" disabled selected>Failed to load videos</option>';
     }
   }
   loadPlaylist();
 
   selector.addEventListener('change', (e) => {
     const newUrl = e.target.value;
+    if (!newUrl) return;
     changeVideoSource(newUrl);
     socket.emit('change_video', newUrl);
   });
 
   function changeVideoSource(url) {
     isRemoteChange = true;
+    removeSubtitleTracks();
     video.src = url;
     selector.value = url;
+    attachSubtitleForUrl(url);
     video.currentTime = 0;
     video.pause();
-    setTimeout(() => { isRemoteChange = false; }, 1000);
+    currentSubtitleOffset = 0;
+    updateOffsetDisplay();
+    setTimeout(() => { isRemoteChange = false; }, 300);
+  }
+
+  function attachSubtitleForUrl(url) {
+    const item = playlist.find(v => v.url === url);
+    const subtitleUrl = item?.subtitleUrl;
+    if (!subtitleUrl) return;
+
+    // Prevent duplicate tracks
+    const exists = Array.from(video.querySelectorAll('track[kind="subtitles"]'))
+      .some(t => t.getAttribute('src') === subtitleUrl);
+    if (exists) return;
+
+    const track = document.createElement('track');
+    track.kind = 'subtitles';
+    track.src = subtitleUrl;
+    track.srclang = 'en';
+    track.label = 'Subtitles';
+    track.default = true;
+    video.appendChild(track);
+
+    try { video.load?.(); } catch {}
+  }
+
+  function removeSubtitleTracks() {
+    const tracks = Array.from(video.querySelectorAll('track[kind="subtitles"]'));
+    tracks.forEach(t => t.remove());
+  }
+
+  function applySubtitleShift(amount) {
+    const tracks = Array.from(video.textTracks);
+    const track = tracks.find(t => t.mode === 'showing') || tracks[0];
+
+    if (!track || !track.cues || track.cues.length === 0) {
+      console.warn("No subtitle cues found to shift.");
+      return;
+    }
+
+    for (let i = 0; i < track.cues.length; i++) {
+      const cue = track.cues[i];
+      cue.startTime += amount;
+      cue.endTime += amount;
+    }
+
+    currentSubtitleOffset += amount;
+    console.log('Subtitle offset now:', currentSubtitleOffset);
+    updateOffsetDisplay();
+  }
+
+  // 2. The User Interaction (Clicking the button)
+  function shiftSubtitles(amount) {
+    // Apply locally immediately
+    applySubtitleShift(amount);
+
+    // Send the NEW TOTAL to the server
+    // We send the total (currentSubtitleOffset) so everyone stays perfectly matched
+    socket.emit('subtitle_offset', currentSubtitleOffset);
+
+    statusMsg.textContent = `Subtitle offset changed to ${currentSubtitleOffset.toFixed(1)}s`;
+  }
+
+  function updateOffsetDisplay() {
+    const display = document.getElementById('offsetDisplay');
+    if (display) {
+      display.textContent = `${currentSubtitleOffset > 0 ? '+' : ''}${currentSubtitleOffset.toFixed(1)}s`;
+      display.style.color = currentSubtitleOffset === 0 ? '#eee' : '#ffd700';
+    }
   }
 
   socket.on('sync_video_change', (newUrl) => {
@@ -260,6 +383,16 @@
     isRemoteChange = true;
     video.currentTime = time;
     statusMsg.textContent = "Seeked";
+  });
+  socket.on('sync_subtitle_offset', (remoteTotalOffset) => {
+    // Calculate the difference between what they have and what we have
+    const diff = remoteTotalOffset - currentSubtitleOffset;
+
+    // Only apply if there is a real difference (avoids loops)
+    if (Math.abs(diff) > 0.05) {
+      applySubtitleShift(diff);
+      statusMsg.textContent = `Remote user shifted subtitles to ${remoteTotalOffset.toFixed(1)}s`;
+    }
   });
 </script>
 </body>
